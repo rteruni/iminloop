@@ -203,6 +203,7 @@
   .hm-hint { font-size: 12px; color: var(--text2); margin-bottom: 0.85rem; font-weight: 500; }
 
   table.hm { border-collapse: separate; border-spacing: 2px; min-width: 600px; }
+  table.hm tbody tr.person-row { border-bottom: 6px solid transparent; }
   table.hm th { font-size: 9px; color: var(--text2); font-weight: 600; text-align: center; padding: 2px 1px; white-space: nowrap; }
   table.hm th.plbl { text-align: left; min-width: 95px; padding-left: 4px; }
   table.hm th.day-head { font-size: 11px; font-weight: 700; color: var(--navy); padding: 5px 2px 3px; }
@@ -210,7 +211,7 @@
   table.hm td.plbl { font-size: 12px; color: var(--text2); padding: 2px 4px; white-space: nowrap; vertical-align: middle; cursor: pointer; }
   table.hm td.plbl .pname { font-weight: 700; color: var(--navy); }
   table.hm td.plbl .ptzsub { font-size: 10px; display: block; font-weight: 500; }
-  table.hm td.cell { width: 22px; height: 52px; border-radius: 3px; cursor: pointer; vertical-align: middle; text-align: center; font-size: 8px; color: transparent; transition: filter 0.1s; }
+  table.hm td.cell { width: 22px; height: 82px; border-radius: 3px; cursor: pointer; vertical-align: middle; text-align: center; font-size: 8px; color: transparent; transition: filter 0.1s; }
   table.hm td.cell:hover { filter: brightness(0.88); }
   table.hm td.cell.empty { background: var(--pale); }
   table.hm td.cell.avail { background: var(--avail-bg); color: var(--avail-text); }
@@ -360,7 +361,7 @@
       <label>Start date</label>
       <input type="date" id="new-start" />
       <label style="min-width:unset;margin-left:8px;">Days</label>
-      <input type="number" id="new-days" value="5" min="3" max="14" style="width:60px;" />
+      <input type="number" id="new-days" value="3" min="1" max="10" style="width:60px;" />
     </div>
     <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       <button class="btn primary" onclick="createNewEvent()">Create event</button>
@@ -388,8 +389,8 @@
   <div class="event-info-bar">
     <span class="ev-title" id="ev-title">Event</span>
     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-      <span class="ev-id-pill-nav" id="ev-id-pill">------</span>
-      <button class="btn sm" onclick="copyId(event)">Copy link</button>
+      <span class="ev-id-pill-nav" id="ev-id-pill" onclick="copyEventId()" title="Click to copy event ID" style="cursor:pointer;">------</span>
+      <button class="btn sm" onclick="copyId(event)">Share event</button>
     </div>
   </div>
 
@@ -409,28 +410,22 @@
 
   <div class="people-row" id="people-row"></div>
   <div class="hm-wrap">
-    <div class="hm-title">Availability — day &amp; hour in each person's local time</div>
+    <div class="hm-title">Availability · day &amp; hour in each person's local time</div>
     <div class="hm-hint" id="active-hint">Select a person above, then click any cell to mark that hour on that day as free.</div>
     <div id="hm-container"></div>
     <div class="legend">
       <div class="leg"><div class="leg-dot" style="background:#C2E7DA;"></div> Available</div>
       <div class="leg"><div class="leg-dot" style="background:#6290C3;"></div> Everyone free</div>
       <div class="leg"><div class="leg-dot" style="background:#F1FFE7;border:1px solid rgba(26,27,65,0.2);"></div> Not marked</div>
-      <div class="leg"><div class="leg-dot" style="background:#C2E7DA;outline:1.5px solid #E8A838;outline-offset:-1.5px;"></div> Next calendar day in that timezone</div>
+      <div class="leg"><div class="leg-dot" style="background:#C2E7DA;outline:1.5px solid #E8A838;outline-offset:-1.5px;"></div> Different calendar day in that timezone</div>
     </div>
   </div>
 
-  <div class="translation-panel" id="translation-panel" style="display:none;">
-    <div class="tp-header">
-      <span class="tp-label">This slot across all timezones</span>
-      <button class="tp-close" onclick="document.getElementById('translation-panel').style.display='none'">×</button>
-    </div>
-    <div class="tp-utc" id="tp-utc"></div>
-    <div class="tp-rows" id="tp-rows"></div>
-  </div>
+  <div id="match-msg" style="display:none; margin-bottom:14px; font-size:14px; font-weight:600; padding: 18px 20px; border-radius: var(--radm); line-height:1.7;"></div>
+
     <div class="card" style="margin-bottom:0;">
-      <div class="card-title">Best overlap slots</div>
-      <div id="best-list"><span style="font-size:13px;color:var(--text2);">Mark availability to see overlaps.</span></div>
+      <div class="card-title">Best match slots</div>
+      <div id="best-list" style="max-height:180px;overflow-y:auto;padding-right:4px;"><span style="font-size:13px;color:var(--text2);">Mark availability to see matches.</span></div>
     </div>
     <div class="card" style="margin-bottom:0;">
       <div class="card-title">Current local time</div>
@@ -442,7 +437,7 @@
 </div><!-- /content -->
 
 <footer>
-  <p>rteruni.github.io</p>
+  <p>i'm in loop · built with vanilla JS · no backend · event data stored in your browser</p>
 </footer>
 
 </div>
@@ -450,7 +445,7 @@
 <script>
 const COLORS = ['#378ADD','#D85A30','#9E3DB8','#B07D10','#1D9E75','#C0392B','#2874A6','#0F6E56'];
 const DAYS_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-const SHOW_HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
+const SHOW_HOURS = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
 
 const TZ_OPTIONS = [
   {tz:'Africa/Johannesburg',label:'🇿🇦 Johannesburg (SAST)'},
@@ -521,7 +516,7 @@ function getDateRange(startDateStr, numDays) {
 }
 function slotKey(dateStr, hour) { return `${dateStr}:${String(hour).padStart(2,'0')}`; }
 
-// ── Storage (localStorage — works on any static host) ─────────────
+// ── Storage (localStorage · works on any static host) ─────────────
 function storageKey(id) { return `sync_ev_${id}`; }
 function myKey() { return 'sync_my_events'; }
 
@@ -557,7 +552,7 @@ function showStatus(elId, msg, type) {
 function showScreen(id) { document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
 function buildSelect() {
   const sel=document.getElementById('new-tz');
-  TZ_OPTIONS.forEach(o=>{ const opt=document.createElement('option'); opt.value=o.tz; opt.textContent=o.label; sel.appendChild(opt); });
+  TZ_OPTIONS.forEach(o=>{ const opt=document.createElement('option'); opt.value=o.tz; opt.textContent=o.label; if(o.tz==='Europe/London') opt.selected=true; sel.appendChild(opt); });
 }
 
 // ── State ─────────────────────────────────────────────────────────
@@ -605,6 +600,15 @@ function goHome() {
   try { const url=new URL(window.location.href); url.searchParams.delete('event'); history.replaceState({},'',url); } catch(e){}
   showScreen('screen-home'); renderHome();
 }
+function copyEventId() {
+  if (!currentEventId) return;
+  const pill = document.getElementById('ev-id-pill');
+  const orig = pill ? pill.textContent : '';
+  fallbackCopy(currentEventId.toUpperCase(), () => {
+    if (pill) { pill.textContent = '✓ Copied!'; setTimeout(() => pill.textContent = orig, 2000); }
+  });
+}
+
 function copyId(e) {
   if (!currentEventId) return;
   const base = (window.location.origin && window.location.origin !== 'null')
@@ -613,10 +617,9 @@ function copyId(e) {
   const shareUrl = base + '?event=' + currentEventId;
 
   const btn = e.target.closest('button');
-  const orig = btn ? btn.textContent : 'Copy link';
+  const orig = btn ? btn.textContent : 'Share event';
   const confirm = () => { if (btn) { btn.textContent = '✓ Copied!'; setTimeout(() => btn.textContent = orig, 2000); } };
 
-  // Try modern clipboard API first
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(shareUrl).then(confirm).catch(() => fallbackCopy(shareUrl, confirm));
   } else {
@@ -709,7 +712,7 @@ function renderDST() {
     document.getElementById('dst-text').textContent=` DST observed by: ${[...dstSet].join(', ')}. Offsets auto-adjust per day.`;
   } else { note.style.display='none'; }
 }
-function buildOverlapCounts() {
+function buildMatchCounts() {
   const counts={};
   (currentEvent.people||[]).forEach(p=>{
     p.freeSlots.forEach(sk=>{
@@ -723,7 +726,7 @@ function buildOverlapCounts() {
 function showTranslation(utcKey, activeDateStr, activeH) {
   const people = currentEvent.people || [];
   const utcDate = new Date(utcKey + ':00:00Z');
-  const counts = buildOverlapCounts();
+  const counts = buildMatchCounts();
   const cnt = counts[utcKey] || 0;
 
   document.getElementById('tp-utc').textContent =
@@ -738,6 +741,8 @@ function showTranslation(utcKey, activeDateStr, activeH) {
     const hh = String(slot.hour).padStart(2,'00');
     const slotD = new Date(slot.dateStr + 'T12:00:00Z');
     const dayLabel = `${DAYS_SHORT[slotD.getUTCDay()]} ${slotD.getUTCDate()}`;
+    const dayDiff = Math.round((slotD - new Date(activeDateStr+'T12:00:00Z')) / 86400000);
+    const dayTag = dayDiff > 0 ? ` +${dayDiff}d` : dayDiff < 0 ? ` ${dayDiff}d` : '';
     return `<div class="tp-row${isActive?' is-active':''}">
       <div class="tp-person">
         <span class="tp-dot" style="background:${p.color}"></span>
@@ -746,8 +751,8 @@ function showTranslation(utcKey, activeDateStr, activeH) {
       </div>
       <div style="display:flex;align-items:center;">
         <span class="tp-time${isNextDay?' nextday':''}">${hh}:00</span>
-        <span class="tp-day">${dayLabel}${isNextDay?' +1':''}</span>
-        <span class="tp-avail ${isFree?'yes':'no'}">${isFree?'free':'—'}</span>
+        <span class="tp-day">${dayLabel}${dayTag}</span>
+        <span class="tp-avail ${isFree?'yes':'no'}">${isFree?'free':'·'}</span>
       </div>
     </div>`;
   }).join('');
@@ -761,7 +766,7 @@ function renderHeatmap() {
   if (!people.length) { el.innerHTML='<span style="font-size:14px;color:var(--text2);">Add people to see the heatmap.</span>'; return; }
   const dates=getDateRange(currentEvent.startDate,currentEvent.numDays);
   const ap=people[activePersonIdx]||people[0];
-  const counts=buildOverlapCounts();
+  const counts=buildMatchCounts();
 
   let html='<table class="hm"><thead><tr><th class="plbl"></th>';
   dates.forEach(ds=>{
@@ -783,7 +788,7 @@ function renderHeatmap() {
 
   people.forEach((p,pidx)=>{
     const isActive=pidx===activePersonIdx;
-    html+=`<tr><td class="plbl" onclick="activePersonIdx=${pidx};render()">
+    html+=`<tr class="person-row"><td class="plbl" onclick="activePersonIdx=${pidx};render()">
       <span style="display:flex;align-items:center;gap:4px;">
         <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};flex-shrink:0;"></span>
         <span class="pname">${p.name}</span>${isActive?' <span style="font-size:10px;color:var(--text2);">✎</span>':''}
@@ -804,17 +809,21 @@ function renderHeatmap() {
         const dispH=String(pSlot.hour).padStart(2,'0');
         const title=`${p.name}: ${pSlot.dateStr} ${dispH}:00 (${TZ_SHORT[p.tz]||p.tz})`;
         if (pidx===activePersonIdx) {
-          html+=`<td class="cell ${cls}${isNextDay?' nextday':''}" title="${title}" onclick="toggleSlot(${pidx},'${pSlot.dateStr}',${pSlot.hour});showTranslation('${utcK}','${ds}',${activeH})">${dispH}</td>`;
+          html+=`<td class="cell ${cls}${isNextDay?' nextday':''}" title="${title}" onclick="toggleSlot(${pidx},'${pSlot.dateStr}',${pSlot.hour})">${dispH}</td>`;
         } else {
-          html+=`<td class="cell ${cls}${isNextDay?' nextday':''}" title="${title}" onclick="activePersonIdx=${pidx};render();showTranslation('${utcK}','${ds}',${activeH})">${dispH}</td>`;
+          html+=`<td class="cell ${cls}${isNextDay?' nextday':''}" title="${title}" onclick="activePersonIdx=${pidx};render()">${dispH}</td>`;
         }
       });
       html+='<td class="gap-col"></td>';
     });
     html+='</tr>';
+    // spacer row between people
+    const totalCols = dates.length * (SHOW_HOURS.length + 1) + 1;
+    html+=`<tr style="height:6px;"><td colspan="${totalCols}"></td></tr>`;
   });
 
-  html+='<tr><td class="plbl ovlp-lbl">Overlap</td>';
+  html+='<tr style="height:16px;"><td colspan="999" style="border-top: 1.5px dotted rgba(26,27,65,0.2); padding-top:8px;"></td></tr>';
+  html+='<tr><td class="plbl ovlp-lbl">Match</td>';
   dates.forEach(ds=>{
     SHOW_HOURS.forEach(activeH=>{
       const utcM=localSlotToUTC(ds,activeH,ap.tz);
@@ -838,10 +847,40 @@ function renderHeatmap() {
 function renderBest() {
   const people=currentEvent.people||[];
   const el=document.getElementById('best-list');
-  if (!people.length) { el.innerHTML='<span style="font-size:13px;color:var(--text2);">Add people first.</span>'; return; }
-  const counts=buildOverlapCounts();
+  const msg=document.getElementById('match-msg');
+
+  const updateMsg = (hasMatch, hasFullMatch) => {
+    if (!msg) return;
+    if (people.length < 2) { msg.style.display='none'; return; }
+    const anyoneMarked = Object.keys(counts).length > 0;
+    if (!anyoneMarked) { msg.style.display='none'; return; }
+    if (hasFullMatch) {
+      msg.style.display='block';
+      msg.style.background='#C2E7DA'; msg.style.color='#1A4D3A';
+      msg.innerHTML='🎉 Everyone has a slot in common!<br><span style="font-weight:400;font-size:13px;">Time to lock it in.</span>';
+    } else if (hasMatch) {
+      msg.style.display='block';
+      msg.style.background='#F1FFE7'; msg.style.color='#4a4b72';
+      msg.innerHTML='✨ Some matches found!<br><span style="font-weight:400;font-size:13px;">Not everyone yet · keep going.</span>';
+    } else {
+      msg.style.display='block';
+      msg.style.background='#fff4f0'; msg.style.color='#7a3a2a';
+      msg.innerHTML='😅 No match yet.<br><span style="font-weight:400;font-size:13px;">Try adding more available slots!</span>';
+    }
+  };
+
+  if (!people.length) { el.innerHTML='<span style="font-size:13px;color:var(--text2);">Add people first.</span>'; if(msg) msg.style.display='none'; return; }
+  const counts=buildMatchCounts();
   const sorted=Object.entries(counts).map(([k,c])=>({k,c})).sort((a,b)=>b.c-a.c||a.k.localeCompare(b.k)).slice(0,5);
-  if (!sorted.length) { el.innerHTML='<span style="font-size:13px;color:var(--text2);">Mark availability to find overlaps.</span>'; return; }
+  if (!sorted.length) {
+    el.innerHTML='<span style="font-size:13px;color:var(--text2);">Mark availability to find matches.</span>';
+    updateMsg(false, false);
+    return;
+  }
+  const hasFullMatch = sorted.some(({c})=>c===people.length&&people.length>1);
+  const hasMatch = sorted.some(({c})=>c>=2);
+  updateMsg(hasMatch, hasFullMatch);
+
   el.innerHTML=sorted.map(({k,c})=>{
     const utcDate=new Date(k+':00:00Z');
     const isAll=c===people.length&&people.length>1;
@@ -903,4 +942,3 @@ setInterval(()=>{ if(currentEvent) renderClocks(); }, 1000);
 </script>
 </body>
 </html>
- 
