@@ -370,6 +370,8 @@
 
   footer { text-align: center; font-size: 11px; color: var(--text3); margin-top: 3rem; font-weight: 500; }
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 </head>
 <body>
 <div class="page">
@@ -548,28 +550,93 @@ function getDateRange(startDateStr, numDays) {
 }
 function slotKey(dateStr, hour) { return `${dateStr}:${String(hour).padStart(2,'0')}`; }
 
-// ── Storage (localStorage · works on any static host) ─────────────
-function storageKey(id) { return `sync_ev_${id}`; }
-function myKey() { return 'sync_my_events'; }
+// ── Firebase setup ────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyB1_ldZ1iyZc363_sB-GEB-w3fDAXjqx7w",
+  authDomain: "im-in-loop.firebaseapp.com",
+  databaseURL: "https://im-in-loop-default-rtdb.firebaseio.com",
+  projectId: "im-in-loop",
+  storageBucket: "im-in-loop.firebasestorage.app",
+  messagingSenderId: "294904845780",
+  appId: "1:294904845780:web:b2687f1318b61c2aad3241"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
 
+let liveListener = null; // holds the active Firebase listener
+
+// ── Storage (Firebase Realtime Database) ──────────────────────────
 function loadMyEventIds() {
-  try { return JSON.parse(localStorage.getItem(myKey())||'[]'); } catch(e) { return []; }
+  try { return JSON.parse(localStorage.getItem('sync_my_events')||'[]'); } catch(e) { return []; }
 }
 function saveMyEventIds(ids) {
-  try { localStorage.setItem(myKey(), JSON.stringify(ids)); } catch(e) {}
+  try { localStorage.setItem('sync_my_events', JSON.stringify(ids)); } catch(e) {}
 }
+
+function dbSerialize(data) {
+  return {
+    ...data,
+    people: data.people.map(p => ({
+      ...p,
+      freeSlotsArr: [...p.freeSlots],
+      freeSlots: null
+    }))
+  };
+}
+
+function dbDeserialize(data) {
+  if (!data) return null;
+  data.people = (data.people || []).map(p => {
+    p.freeSlots = new Set(p.freeSlotsArr || []);
+    return p;
+  });
+  return data;
+}
+
+function saveEvent(id, data) {
+  // Also keep local copy as fallback
+  const serialized = dbSerialize(data);
+  try { localStorage.setItem(`sync_ev_${id}`, JSON.stringify(serialized)); } catch(e) {}
+  db.ref(`events/${id}`).set(serialized).catch(e => console.warn('Firebase write failed:', e));
+}
+
 function loadEvent(id) {
+  // Synchronous local fallback only — async Firebase load handled separately
   try {
-    const raw = localStorage.getItem(storageKey(id));
+    const raw = localStorage.getItem(`sync_ev_${id}`);
     if (!raw) return null;
-    const data = JSON.parse(raw);
-    data.people.forEach(p => { p.freeSlots = new Set(p.freeSlotsArr||[]); });
-    return data;
+    return dbDeserialize(JSON.parse(raw));
   } catch(e) { return null; }
 }
-function saveEvent(id, data) {
-  const toSave = {...data, people: data.people.map(p=>({...p,freeSlotsArr:[...p.freeSlots],freeSlots:undefined}))};
-  try { localStorage.setItem(storageKey(id), JSON.stringify(toSave)); } catch(e) {}
+
+async function loadEventFromFirebase(id) {
+  try {
+    const snap = await db.ref(`events/${id}`).get();
+    if (!snap.exists()) return null;
+    return dbDeserialize(snap.val());
+  } catch(e) { return null; }
+}
+
+function startLiveSync(id) {
+  // Detach any previous listener
+  if (liveListener) { db.ref(`events/${liveListener}`).off(); liveListener = null; }
+  liveListener = id;
+  db.ref(`events/${id}`).on('value', snap => {
+    if (!snap.exists()) return;
+    const fresh = dbDeserialize(snap.val());
+    if (!fresh || !currentEventId || currentEventId !== id) return;
+    // Preserve active person index
+    const prevActive = activePersonIdx;
+    currentEvent = fresh;
+    activePersonIdx = Math.min(prevActive, fresh.people.length - 1);
+    // Update local cache
+    try { localStorage.setItem(`sync_ev_${id}`, JSON.stringify(dbSerialize(fresh))); } catch(e) {}
+    render();
+  });
+}
+
+function stopLiveSync() {
+  if (liveListener) { db.ref(`events/${liveListener}`).off(); liveListener = null; }
 }
 
 // ── Utilities ─────────────────────────────────────────────────────
@@ -596,7 +663,7 @@ let activePersonIdx = 0;
 function createNewEvent() {
   const name=document.getElementById('new-event-name').value.trim();
   const start=document.getElementById('new-start').value;
-  const numDays=parseInt(document.getElementById('new-days').value)||7;
+  const numDays=parseInt(document.getElementById('new-days').value)||3;
   if (!name) { showStatus('create-status','Enter an event name.','err'); return; }
   if (!start) { showStatus('create-status','Pick a start date.','err'); return; }
   const id=genId();
@@ -606,11 +673,15 @@ function createNewEvent() {
   showStatus('create-status',`Created! ID: ${id.toUpperCase()}`,'ok');
   setTimeout(()=>openEvent(id), 600);
 }
-function joinEvent() {
+async function joinEvent() {
   const id=document.getElementById('join-id').value.trim().toLowerCase();
   if (!id) { showStatus('join-status','Enter an event ID.','err'); return; }
-  const data=loadEvent(id);
+  showStatus('join-status','Looking up event...','');
+  // Try Firebase first
+  const data = await loadEventFromFirebase(id);
   if (!data) { showStatus('join-status','Event not found. Check the ID.','err'); return; }
+  // Save locally
+  try { localStorage.setItem(`sync_ev_${id}`, JSON.stringify(dbSerialize(data))); } catch(e) {}
   const ids=loadMyEventIds(); if(!ids.includes(id)){ ids.unshift(id); saveMyEventIds(ids); }
   openEvent(id);
 }
@@ -625,9 +696,11 @@ function openEvent(id) {
   document.getElementById('ev-id-pill').textContent=id.toUpperCase();
   showScreen('screen-event');
   try { const url=new URL(window.location.href); url.searchParams.set('event',id); history.replaceState({},'',url); } catch(e){}
+  startLiveSync(id);
   render();
 }
 function goHome() {
+  stopLiveSync();
   currentEventId=null; currentEvent=null;
   try { const url=new URL(window.location.href); url.searchParams.delete('event'); history.replaceState({},'',url); } catch(e){}
   showScreen('screen-home'); renderHome();
@@ -642,24 +715,11 @@ function copyEventId() {
 }
 
 function encodeEventToUrl() {
-  if (!currentEvent || !currentEventId) return null;
+  if (!currentEventId) return null;
   const base = (window.location.origin && window.location.origin !== 'null')
     ? window.location.origin + window.location.pathname
     : window.location.href.split('?')[0];
-  const payload = {
-    id: currentEventId,
-    name: currentEvent.name,
-    startDate: currentEvent.startDate,
-    numDays: currentEvent.numDays,
-    people: currentEvent.people.map(p => ({
-      id: p.id, name: p.name, tz: p.tz, color: p.color,
-      freeSlotsArr: [...p.freeSlots]
-    }))
-  };
-  try {
-    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
-    return base + '?data=' + encoded;
-  } catch(e) { return base + '?event=' + currentEventId; }
+  return base + '?event=' + currentEventId;
 }
 
 function copyId(e) {
@@ -973,39 +1033,47 @@ const today=new Date();
 document.getElementById('new-start').value=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
 
 // Auto-open event from URL param (for shared links)
-try {
-  const urlParams = new URLSearchParams(window.location.search);
-  const encodedData = urlParams.get('data');
-  const urlEventId = urlParams.get('event');
+(async () => {
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const encodedData = urlParams.get('data');
+    const urlEventId = urlParams.get('event');
 
-  if (encodedData) {
-    // Full event encoded in URL — decode and load it
-    const payload = JSON.parse(decodeURIComponent(escape(atob(encodedData))));
-    payload.people.forEach(p => { p.freeSlots = new Set(p.freeSlotsArr || []); });
-    // Save to localStorage so it persists
-    saveEvent(payload.id, payload);
-    const ids = loadMyEventIds();
-    if (!ids.includes(payload.id)) { ids.unshift(payload.id); saveMyEventIds(ids); }
-    currentEventId = payload.id;
-    currentEvent = payload;
-    activePersonIdx = 0;
-    document.getElementById('ev-title').textContent = payload.name;
-    document.getElementById('ev-id-pill').textContent = payload.id.toUpperCase();
-    showScreen('screen-event');
-    render();
-  } else if (urlEventId) {
-    // Fallback: old-style ID-only link, try localStorage
-    const data = loadEvent(urlEventId.toLowerCase());
-    if (data) {
+    if (encodedData) {
+      // Legacy: full event encoded in URL — decode, save to Firebase, open
+      const payload = JSON.parse(decodeURIComponent(escape(atob(encodedData))));
+      payload.people.forEach(p => { p.freeSlots = new Set(p.freeSlotsArr || []); });
+      saveEvent(payload.id, payload);
       const ids = loadMyEventIds();
-      if (!ids.includes(urlEventId.toLowerCase())) { ids.unshift(urlEventId.toLowerCase()); saveMyEventIds(ids); }
-      openEvent(urlEventId.toLowerCase());
+      if (!ids.includes(payload.id)) { ids.unshift(payload.id); saveMyEventIds(ids); }
+      currentEventId = payload.id;
+      currentEvent = payload;
+      activePersonIdx = 0;
+      document.getElementById('ev-title').textContent = payload.name;
+      document.getElementById('ev-id-pill').textContent = payload.id.toUpperCase();
+      showScreen('screen-event');
+      startLiveSync(payload.id);
+      render();
+    } else if (urlEventId) {
+      // Load from Firebase
+      const id = urlEventId.toLowerCase();
+      const data = await loadEventFromFirebase(id);
+      if (data) {
+        try { localStorage.setItem(`sync_ev_${id}`, JSON.stringify(dbSerialize(data))); } catch(e) {}
+        const ids = loadMyEventIds();
+        if (!ids.includes(id)) { ids.unshift(id); saveMyEventIds(ids); }
+        currentEventId = id; currentEvent = data; activePersonIdx = 0;
+        document.getElementById('ev-title').textContent = data.name;
+        document.getElementById('ev-id-pill').textContent = id.toUpperCase();
+        showScreen('screen-event');
+        startLiveSync(id);
+        render();
+      } else { renderHome(); }
     } else { renderHome(); }
-  } else { renderHome(); }
-} catch(e) { renderHome(); }
+  } catch(e) { console.warn(e); renderHome(); }
+})();
 
 setInterval(()=>{ if(currentEvent) renderClocks(); }, 1000);
 </script>
 </body>
 </html>
-
